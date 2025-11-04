@@ -1,0 +1,984 @@
+<!DOCTYPE html>
+<html lang="cs">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Správa odečtů měřidel</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/3.9.1/chart.min.js"></script>
+    <style>
+        .chart-container {
+            position: relative;
+            height: 350px !important;
+            max-height: 350px !important;
+            width: 100%;
+        }
+        .chart-container canvas {
+            max-height: 350px !important;
+        }
+        .heatmap-cell {
+            padding: 8px;
+            text-align: center;
+            font-weight: 600;
+            font-size: 14px;
+            border: 1px solid #e5e7eb;
+        }
+        .heatmap-header {
+            background: #f3f4f6;
+            font-weight: 700;
+            padding: 10px 8px;
+            text-align: center;
+            border: 1px solid #e5e7eb;
+        }
+    </style>
+</head>
+<body class="bg-gray-50 min-h-screen">
+    
+    <div id="homePage" class="p-4 md:p-8">
+        <div class="max-w-7xl mx-auto">
+            <div class="mb-8 text-center">
+                <h1 class="text-4xl md:text-5xl font-bold text-gray-800 mb-2">
+                    Správa odečtů měřidel
+                </h1>
+                <p class="text-gray-600">Přehled spotřeby elektřiny a vody</p>
+            </div>
+
+            <div id="loading" class="text-center py-12">
+                <div class="inline-block animate-spin rounded-full h-12 w-12 border-4 border-blue-500 border-t-transparent mb-4"></div>
+                <p class="text-gray-700 text-xl">Načítám data...</p>
+            </div>
+
+            <div id="metersGrid" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-8 hidden"></div>
+
+            <div class="mb-8 text-center hidden" id="addButtonContainer">
+                <button onclick="showAddForm()" class="bg-blue-600 hover:bg-blue-700 text-white px-8 py-4 rounded-xl font-semibold inline-flex items-center gap-2 transition-all shadow-lg">
+                    <span class="text-xl">+</span>
+                    Přidat nový odečet
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <div id="detailPage" class="p-4 md:p-8 hidden">
+        <div class="max-w-7xl mx-auto">
+            <div class="bg-white rounded-2xl p-6 border border-gray-200 mb-6 shadow-sm">
+                <div class="flex flex-wrap items-center gap-4 justify-between">
+                    <button onclick="goHome()" class="text-gray-600 hover:text-gray-900 transition-all font-medium">
+                        ← Zpět na přehled
+                    </button>
+                    
+                    <div class="flex flex-wrap items-center gap-4">
+                        <div>
+                            <label class="text-gray-600 text-sm mb-1 block">Měřidlo</label>
+                            <select id="meterSelect" onchange="changeMeter()" class="bg-white text-gray-800 px-4 py-2 rounded-lg border border-gray-300 focus:border-blue-500 focus:outline-none">
+                            </select>
+                        </div>
+                        
+                        <div>
+                            <label class="text-gray-600 text-sm mb-1 block">Od data</label>
+                            <input type="date" id="dateFrom" onchange="applyFilters()" class="bg-white text-gray-800 px-4 py-2 rounded-lg border border-gray-300 focus:border-blue-500 focus:outline-none">
+                        </div>
+                        
+                        <div>
+                            <label class="text-gray-600 text-sm mb-1 block">Do data</label>
+                            <input type="date" id="dateTo" onchange="applyFilters()" class="bg-white text-gray-800 px-4 py-2 rounded-lg border border-gray-300 focus:border-blue-500 focus:outline-none">
+                        </div>
+                        
+                        <button onclick="resetFilters()" class="bg-gray-200 hover:bg-gray-300 text-gray-700 px-4 py-2 rounded-lg transition-all mt-5">
+                            Reset
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <div class="bg-gradient-to-br from-blue-500 to-blue-700 rounded-2xl p-8 mb-6 shadow-lg">
+                <div class="flex items-center justify-between">
+                    <div>
+                        <h2 id="currentMeterName" class="text-white text-3xl font-bold mb-2"></h2>
+                        <p class="text-blue-100 text-sm">Aktuální stav měřidla</p>
+                    </div>
+                    <div class="text-right">
+                        <div class="flex items-baseline gap-2 justify-end">
+                            <span id="currentValue" class="text-5xl font-bold text-white">-</span>
+                            <span id="currentUnit" class="text-2xl text-blue-100"></span>
+                        </div>
+                        <p id="currentDate" class="text-blue-100 text-sm mt-2">-</p>
+                    </div>
+                </div>
+            </div>
+
+            <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
+                <div class="bg-white rounded-2xl p-6 border border-gray-200 shadow-sm">
+                    <h3 class="text-gray-800 font-semibold text-lg mb-4">📊 Heatmapa spotřeby</h3>
+                    <div class="overflow-x-auto">
+                        <table id="heatmapTable" class="w-full border-collapse"></table>
+                    </div>
+                </div>
+
+                <div class="bg-white rounded-2xl p-6 border border-gray-200 shadow-sm">
+                    <h3 class="text-gray-800 font-semibold text-lg mb-4">📈 Měsíční spotřeba</h3>
+                    <div class="chart-container">
+                        <canvas id="monthlyChart"></canvas>
+                    </div>
+                </div>
+
+                <div class="bg-white rounded-2xl p-6 border border-gray-200 shadow-sm">
+                    <h3 class="text-gray-800 font-semibold text-lg mb-4">📊 Roční spotřeba</h3>
+                    <div class="chart-container">
+                        <canvas id="yearlyChart"></canvas>
+                    </div>
+                </div>
+
+                <div class="bg-white rounded-2xl p-6 border border-gray-200 shadow-sm">
+                    <h3 class="text-gray-800 font-semibold text-lg mb-4">📉 Vývoj stavu v čase</h3>
+                    <div class="chart-container">
+                        <canvas id="trendChart"></canvas>
+                    </div>
+                </div>
+
+                <div class="bg-white rounded-2xl p-6 border border-gray-200 shadow-sm">
+                    <h3 class="text-gray-800 font-semibold text-lg mb-4">📊 Průměrná spotřeba podle měsíce</h3>
+                    <div class="chart-container">
+                        <canvas id="avgMonthChart"></canvas>
+                    </div>
+                </div>
+
+                <div class="bg-white rounded-2xl p-6 border border-gray-200 shadow-sm">
+                    <h3 class="text-gray-800 font-semibold text-lg mb-4">📈 Denní průměrná spotřeba</h3>
+                    <div class="chart-container">
+                        <canvas id="dailyAvgChart"></canvas>
+                    </div>
+                </div>
+
+                <div class="bg-white rounded-2xl p-6 border border-gray-200 shadow-sm">
+                    <h3 class="text-gray-800 font-semibold text-lg mb-4">🔄 Porovnání roků</h3>
+                    <div class="chart-container">
+                        <canvas id="yearComparisonChart"></canvas>
+                    </div>
+                </div>
+
+                <div class="bg-white rounded-2xl p-6 border border-gray-200 shadow-sm">
+                    <h3 class="text-gray-800 font-semibold text-lg mb-4">📈 Statistiky</h3>
+                    <div class="space-y-4">
+                        <div class="flex justify-between items-center py-3 border-b border-gray-200">
+                            <span class="text-gray-600">Průměrná měsíční spotřeba</span>
+                            <span id="avgConsumption" class="text-gray-900 font-bold text-lg">-</span>
+                        </div>
+                        <div class="flex justify-between items-center py-3 border-b border-gray-200">
+                            <span class="text-gray-600">Maximální spotřeba</span>
+                            <span id="maxConsumption" class="text-gray-900 font-bold text-lg">-</span>
+                        </div>
+                        <div class="flex justify-between items-center py-3 border-b border-gray-200">
+                            <span class="text-gray-600">Minimální spotřeba</span>
+                            <span id="minConsumption" class="text-gray-900 font-bold text-lg">-</span>
+                        </div>
+                        <div class="flex justify-between items-center py-3 border-b border-gray-200">
+                            <span class="text-gray-600">Celková spotřeba</span>
+                            <span id="totalConsumption" class="text-gray-900 font-bold text-lg">-</span>
+                        </div>
+                        <div class="flex justify-between items-center py-3">
+                            <span class="text-gray-600">Počet odečtů</span>
+                            <span id="readingCount" class="text-gray-900 font-bold text-lg">-</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="bg-white rounded-2xl p-6 border border-gray-200 shadow-sm">
+                <div class="flex justify-between items-center mb-4">
+                    <h3 class="text-gray-800 font-semibold text-lg">📋 Historie odečtů</h3>
+                    <button onclick="exportCSV()" class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg transition-all">
+                        📥 Export CSV
+                    </button>
+                </div>
+                <div class="overflow-x-auto">
+                    <table class="w-full">
+                        <thead class="bg-gray-50">
+                            <tr class="border-b border-gray-200">
+                                <th class="text-left text-gray-700 py-3 px-4 font-semibold">Datum</th>
+                                <th class="text-right text-gray-700 py-3 px-4 font-semibold">Stav</th>
+                                <th class="text-right text-gray-700 py-3 px-4 font-semibold">Spotřeba</th>
+                                <th class="text-right text-gray-700 py-3 px-4 font-semibold">Rozdíl dnů</th>
+                                <th class="text-right text-gray-700 py-3 px-4 font-semibold">Denní průměr</th>
+                            </tr>
+                        </thead>
+                        <tbody id="historyTable"></tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div id="addModal" class="fixed inset-0 bg-black bg-opacity-50 backdrop-blur-sm flex items-center justify-center p-4 z-50 hidden">
+        <div class="bg-white rounded-2xl p-8 max-w-md w-full border border-gray-200 shadow-xl">
+            <h2 class="text-2xl font-bold text-gray-800 mb-6">Nový odečet</h2>
+            
+            <div id="meterSelection" class="space-y-3">
+                <p class="text-gray-600 mb-4">Vyberte měřidlo:</p>
+                <div id="meterButtons"></div>
+                <button onclick="closeAddForm()" class="w-full mt-4 bg-gray-200 hover:bg-gray-300 text-gray-700 py-3 rounded-xl transition-all">
+                    Zrušit
+                </button>
+            </div>
+
+            <div id="addFormFields" class="space-y-4 hidden">
+                <div>
+                    <label class="block text-gray-700 mb-2 font-medium">Měřidlo</label>
+                    <div id="selectedMeterName" class="bg-gray-100 p-3 rounded-xl text-gray-800"></div>
+                </div>
+                
+                <div>
+                    <label class="block text-gray-700 mb-2 font-medium">Datum</label>
+                    <input type="date" id="datumInput" class="w-full bg-white text-gray-800 px-4 py-3 rounded-xl border border-gray-300 focus:border-blue-500 focus:outline-none">
+                </div>
+                
+                <div>
+                    <label class="block text-gray-700 mb-2 font-medium">Stav <span id="unitLabel"></span></label>
+                    <input type="number" step="0.01" id="stavInput" class="w-full bg-white text-gray-800 px-4 py-3 rounded-xl border border-gray-300 focus:border-blue-500 focus:outline-none" placeholder="Zadejte hodnotu">
+                </div>
+                
+                <div class="flex gap-3 pt-4">
+                    <button onclick="cancelAddForm()" class="flex-1 bg-gray-200 hover:bg-gray-300 text-gray-700 py-3 rounded-xl transition-all">
+                        Zrušit
+                    </button>
+                    <button onclick="submitReading()" id="submitBtn" class="flex-1 bg-blue-600 hover:bg-blue-700 text-white py-3 rounded-xl transition-all">
+                        Uložit
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        var API_URL = 'https://script.google.com/macros/s/AKfycbzB7IgNZUVrj5TwyKzgSTLWIhumVkdtDpk1q9rvWXO03qI5asEFuA4kcHQ3faX4fJ-WnQ/exec';
+        
+        var METERS = [
+            { id: 'elektromer_sazava', name: 'Elektroměr Sázava', icon: '⚡', color: 'from-yellow-400 to-orange-500', unit: 'kWh' },
+            { id: 'elektromer_milovice', name: 'Elektroměr Milovice', icon: '⚡', color: 'from-blue-400 to-cyan-500', unit: 'kWh' },
+            { id: 'voda_sazava', name: 'Voda Sázava', icon: '💧', color: 'from-blue-400 to-blue-600', unit: 'm³' },
+            { id: 'tepla_voda_milovice', name: 'Teplá voda Milovice', icon: '🔥', color: 'from-red-400 to-pink-500', unit: 'm³' },
+            { id: 'studena_voda_milovice', name: 'Studená voda Milovice', icon: '❄️', color: 'from-cyan-300 to-blue-500', unit: 'm³' }
+        ];
+
+        var allData = {};
+        var selectedMeter = null;
+        var filteredData = [];
+        var charts = {};
+        var currentMeterForAdd = null;
+
+        function loadAllData() {
+            var promises = METERS.map(function(meter) {
+                return fetch(API_URL + '?sheet=' + meter.id)
+                    .then(function(response) { return response.json(); })
+                    .then(function(json) {
+                        allData[meter.id] = json.sort(function(a, b) {
+                            return new Date(a.datum) - new Date(b.datum);
+                        });
+                    })
+                    .catch(function(error) {
+                        console.error('Chyba při načítání ' + meter.id + ':', error);
+                        allData[meter.id] = [];
+                    });
+            });
+            
+            Promise.all(promises).then(function() {
+                renderMeters();
+            });
+        }
+
+        function renderMeters() {
+            var grid = document.getElementById('metersGrid');
+            var loading = document.getElementById('loading');
+            var addBtn = document.getElementById('addButtonContainer');
+            
+            grid.innerHTML = '';
+            
+            METERS.forEach(function(meter) {
+                var data = allData[meter.id] || [];
+                var latest = data.length > 0 ? data[data.length - 1] : null;
+                var consumption = data.length >= 2 ? data[data.length - 1].stav - data[data.length - 2].stav : null;
+                
+                var card = document.createElement('div');
+                card.className = 'bg-white rounded-2xl p-6 border border-gray-200 hover:border-blue-400 hover:shadow-lg transition-all cursor-pointer transform hover:scale-105';
+                card.onclick = function() { showDetailPage(meter); };
+                
+                var html = '<div class="w-12 h-12 rounded-xl bg-gradient-to-br ' + meter.color + ' flex items-center justify-center mb-4 text-2xl shadow-md">' + meter.icon + '</div>';
+                html += '<h3 class="text-gray-800 font-semibold text-lg mb-2">' + meter.name + '</h3>';
+                
+                if (latest) {
+                    html += '<div class="flex items-baseline gap-2 mb-1">';
+                    html += '<span class="text-3xl font-bold text-gray-900">' + latest.stav + '</span>';
+                    html += '<span class="text-gray-500">' + meter.unit + '</span>';
+                    html += '</div>';
+                    html += '<p class="text-gray-500 text-sm mb-3">' + new Date(latest.datum).toLocaleDateString('cs-CZ') + '</p>';
+                    
+                    if (consumption !== null) {
+                        html += '<div class="flex items-center gap-2 text-sm bg-green-50 p-2 rounded-lg">';
+                        html += '<span class="text-green-600">↗</span>';
+                        html += '<span class="text-gray-700">Spotřeba: <span class="text-gray-900 font-semibold">' + consumption.toFixed(2) + '</span> ' + meter.unit + '</span>';
+                        html += '</div>';
+                    }
+                } else {
+                    html += '<p class="text-gray-400">Žádná data</p>';
+                }
+                
+                card.innerHTML = html;
+                grid.appendChild(card);
+            });
+            
+            loading.classList.add('hidden');
+            grid.classList.remove('hidden');
+            addBtn.classList.remove('hidden');
+        }
+
+        function showDetailPage(meter) {
+            selectedMeter = meter;
+            document.getElementById('homePage').classList.add('hidden');
+            document.getElementById('detailPage').classList.remove('hidden');
+            
+            var select = document.getElementById('meterSelect');
+            select.innerHTML = '';
+            METERS.forEach(function(m) {
+                var option = document.createElement('option');
+                option.value = m.id;
+                option.textContent = m.icon + ' ' + m.name;
+                if (m.id === meter.id) option.selected = true;
+                select.appendChild(option);
+            });
+            
+            resetFilters();
+            updateDetailPage();
+        }
+
+        function goHome() {
+            document.getElementById('homePage').classList.remove('hidden');
+            document.getElementById('detailPage').classList.add('hidden');
+            destroyAllCharts();
+        }
+
+        function changeMeter() {
+            var meterId = document.getElementById('meterSelect').value;
+            selectedMeter = METERS.find(function(m) { return m.id === meterId; });
+            resetFilters();
+            updateDetailPage();
+        }
+
+        function applyFilters() {
+            var dateFrom = document.getElementById('dateFrom').value;
+            var dateTo = document.getElementById('dateTo').value;
+            
+            var data = allData[selectedMeter.id] || [];
+            filteredData = data.filter(function(item) {
+                var date = new Date(item.datum);
+                var valid = true;
+                if (dateFrom) valid = valid && date >= new Date(dateFrom);
+                if (dateTo) valid = valid && date <= new Date(dateTo);
+                return valid;
+            });
+            
+            updateDetailPage();
+        }
+
+        function resetFilters() {
+            document.getElementById('dateFrom').value = '';
+            document.getElementById('dateTo').value = '';
+            filteredData = allData[selectedMeter.id] || [];
+            updateDetailPage();
+        }
+
+        function updateDetailPage() {
+            document.getElementById('currentMeterName').textContent = selectedMeter.name;
+            document.getElementById('currentUnit').textContent = selectedMeter.unit;
+            
+            if (filteredData.length > 0) {
+                var latest = filteredData[filteredData.length - 1];
+                document.getElementById('currentValue').textContent = latest.stav;
+                document.getElementById('currentDate').textContent = 'K datu: ' + new Date(latest.datum).toLocaleDateString('cs-CZ');
+            }
+            
+            renderAllCharts();
+            renderHistoryTable();
+            calculateStatistics();
+        }
+
+        function renderAllCharts() {
+            destroyAllCharts();
+            renderHeatmap();
+            renderMonthlyChart();
+            renderYearlyChart();
+            renderTrendChart();
+            renderAvgMonthChart();
+            renderDailyAvgChart();
+            renderYearComparisonChart();
+        }
+
+        function destroyAllCharts() {
+            Object.keys(charts).forEach(function(key) {
+                if (charts[key]) charts[key].destroy();
+            });
+            charts = {};
+        }
+
+        function getConsumptionData() {
+            var consumptions = [];
+            for (var i = 1; i < filteredData.length; i++) {
+                var consumption = filteredData[i].stav - filteredData[i - 1].stav;
+                var date = new Date(filteredData[i].datum);
+                var daysDiff = Math.round((new Date(filteredData[i].datum) - new Date(filteredData[i - 1].datum)) / (1000 * 60 * 60 * 24));
+                
+                // Ignorovat záporné hodnoty (výměna měřidla)
+                if (consumption >= 0) {
+                    consumptions.push({
+                        date: date,
+                        value: consumption,
+                        year: date.getFullYear(),
+                        month: date.getMonth(),
+                        monthName: date.toLocaleDateString('cs-CZ', { month: 'short' }),
+                        daysDiff: daysDiff,
+                        dailyAvg: daysDiff > 0 ? consumption / daysDiff : 0,
+                        isMeterChange: false
+                    });
+                } else {
+                    // Označit jako výměna měřidla
+                    consumptions.push({
+                        date: date,
+                        value: 0,
+                        year: date.getFullYear(),
+                        month: date.getMonth(),
+                        monthName: date.toLocaleDateString('cs-CZ', { month: 'short' }),
+                        daysDiff: daysDiff,
+                        dailyAvg: 0,
+                        isMeterChange: true
+                    });
+                }
+            }
+            return consumptions;
+        }
+
+        function getHeatColor(value, min, max) {
+            if (value === 0) return '#f3f4f6';
+            var ratio = (value - min) / (max - min);
+            if (ratio < 0.25) return '#fef3c7';
+            if (ratio < 0.5) return '#fcd34d';
+            if (ratio < 0.75) return '#fb923c';
+            return '#f87171';
+        }
+
+        function renderHeatmap() {
+            var consumptions = getConsumptionData();
+            var heatmapData = {};
+            
+            consumptions.forEach(function(c) {
+                var key = c.year + '-' + c.month;
+                if (!heatmapData[key]) heatmapData[key] = [];
+                heatmapData[key].push(c.value);
+            });
+            
+            var years = [];
+            consumptions.forEach(function(c) {
+                if (years.indexOf(c.year) === -1) years.push(c.year);
+            });
+            years.sort();
+            
+            var months = ['leden', 'únor', 'březen', 'duben', 'květen', 'červen', 'červenec', 'srpen', 'září', 'říjen', 'listopad', 'prosinec'];
+            
+            var allValues = [];
+            Object.keys(heatmapData).forEach(function(key) {
+                var values = heatmapData[key];
+                var sum = values.reduce(function(a, b) { return a + b; }, 0);
+                allValues.push(sum);
+            });
+            var minVal = Math.min.apply(null, allValues);
+            var maxVal = Math.max.apply(null, allValues);
+            
+            var table = document.getElementById('heatmapTable');
+            table.innerHTML = '';
+            
+            var headerRow = document.createElement('tr');
+            headerRow.innerHTML = '<th class="heatmap-header">Měsíc</th>';
+            years.forEach(function(year) {
+                headerRow.innerHTML += '<th class="heatmap-header">' + year + '</th>';
+            });
+            headerRow.innerHTML += '<th class="heatmap-header">Celkem</th>';
+            table.appendChild(headerRow);
+            
+            months.forEach(function(month, monthIdx) {
+                var row = document.createElement('tr');
+                row.innerHTML = '<td class="heatmap-header">' + month + '</td>';
+                
+                var rowTotal = 0;
+                years.forEach(function(year) {
+                    var key = year + '-' + monthIdx;
+                    var values = heatmapData[key] || [];
+                    var sum = values.length > 0 ? values.reduce(function(a, b) { return a + b; }, 0) : 0;
+                    rowTotal += sum;
+                    var color = sum > 0 ? getHeatColor(sum, minVal, maxVal) : '#f3f4f6';
+                    row.innerHTML += '<td class="heatmap-cell" style="background-color: ' + color + '">' + (sum > 0 ? Math.round(sum) : '') + '</td>';
+                });
+                
+                row.innerHTML += '<td class="heatmap-cell font-bold bg-gray-100">' + Math.round(rowTotal) + '</td>';
+                table.appendChild(row);
+            });
+            
+            var totalRow = document.createElement('tr');
+            totalRow.innerHTML = '<td class="heatmap-header">Celkem</td>';
+            var grandTotal = 0;
+            years.forEach(function(year) {
+                var yearTotal = 0;
+                for (var m = 0; m < 12; m++) {
+                    var key = year + '-' + m;
+                    var values = heatmapData[key] || [];
+                    yearTotal += values.length > 0 ? values.reduce(function(a, b) { return a + b; }, 0) : 0;
+                }
+                grandTotal += yearTotal;
+                totalRow.innerHTML += '<td class="heatmap-cell font-bold bg-gray-100">' + Math.round(yearTotal) + '</td>';
+            });
+            totalRow.innerHTML += '<td class="heatmap-cell font-bold bg-gray-200">' + Math.round(grandTotal) + '</td>';
+            table.appendChild(totalRow);
+        }
+
+        function renderMonthlyChart() {
+            var consumptions = getConsumptionData();
+            var labels = [];
+            var data = [];
+            
+            consumptions.forEach(function(c) {
+                var label = c.monthName + ' ' + c.year;
+                labels.push(label);
+                data.push(c.value);
+            });
+            
+            var ctx = document.getElementById('monthlyChart').getContext('2d');
+            charts.monthly = new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: labels,
+                    datasets: [{
+                        label: 'Spotřeba (' + selectedMeter.unit + ')',
+                        data: data,
+                        backgroundColor: '#3b82f6',
+                        borderRadius: 6
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: { labels: { color: '#374151' } }
+                    },
+                    scales: {
+                        x: { 
+                            ticks: { 
+                                color: '#6b7280',
+                                maxRotation: 45,
+                                minRotation: 45
+                            },
+                            grid: { color: '#e5e7eb' }
+                        },
+                        y: { 
+                            ticks: { color: '#6b7280' },
+                            grid: { color: '#e5e7eb' }
+                        }
+                    }
+                }
+            });
+        }
+
+        function renderYearlyChart() {
+            var consumptions = getConsumptionData();
+            var yearlyData = {};
+            
+            consumptions.forEach(function(c) {
+                if (!yearlyData[c.year]) yearlyData[c.year] = 0;
+                yearlyData[c.year] += c.value;
+            });
+            
+            var years = Object.keys(yearlyData).sort();
+            var data = years.map(function(y) { return yearlyData[y]; });
+            
+            var ctx = document.getElementById('yearlyChart').getContext('2d');
+            charts.yearly = new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: years,
+                    datasets: [{
+                        label: 'Roční spotřeba (' + selectedMeter.unit + ')',
+                        data: data,
+                        backgroundColor: '#10b981',
+                        borderRadius: 6
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: { labels: { color: '#374151' } }
+                    },
+                    scales: {
+                        x: { 
+                            ticks: { color: '#6b7280' },
+                            grid: { color: '#e5e7eb' }
+                        },
+                        y: { 
+                            ticks: { color: '#6b7280' },
+                            grid: { color: '#e5e7eb' }
+                        }
+                    }
+                }
+            });
+        }
+
+        function renderTrendChart() {
+            var ctx = document.getElementById('trendChart').getContext('2d');
+            charts.trend = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: filteredData.map(function(d) { return new Date(d.datum).toLocaleDateString('cs-CZ', { month: 'short', year: 'numeric' }); }),
+                    datasets: [{
+                        label: 'Stav (' + selectedMeter.unit + ')',
+                        data: filteredData.map(function(d) { return d.stav; }),
+                        borderColor: '#8b5cf6',
+                        backgroundColor: 'rgba(139, 92, 246, 0.1)',
+                        tension: 0.4,
+                        fill: true
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: { labels: { color: '#374151' } }
+                    },
+                    scales: {
+                        x: { 
+                            ticks: { color: '#6b7280' },
+                            grid: { color: '#e5e7eb' }
+                        },
+                        y: { 
+                            ticks: { color: '#6b7280' },
+                            grid: { color: '#e5e7eb' }
+                        }
+                    }
+                }
+            });
+        }
+
+        function renderAvgMonthChart() {
+            var consumptions = getConsumptionData();
+            var monthlyAvg = {};
+            var monthlyCount = {};
+            
+            consumptions.forEach(function(c) {
+                if (!monthlyAvg[c.month]) {
+                    monthlyAvg[c.month] = 0;
+                    monthlyCount[c.month] = 0;
+                }
+                monthlyAvg[c.month] += c.value;
+                monthlyCount[c.month]++;
+            });
+            
+            var months = ['leden', 'únor', 'březen', 'duben', 'květen', 'červen', 'červenec', 'srpen', 'září', 'říjen', 'listopad', 'prosinec'];
+            var data = months.map(function(m, idx) {
+                return monthlyCount[idx] ? monthlyAvg[idx] / monthlyCount[idx] : 0;
+            });
+            
+            var ctx = document.getElementById('avgMonthChart').getContext('2d');
+            charts.avgMonth = new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: months,
+                    datasets: [{
+                        label: 'Průměrná spotřeba (' + selectedMeter.unit + ')',
+                        data: data,
+                        backgroundColor: '#f59e0b',
+                        borderRadius: 6
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: { labels: { color: '#374151' } }
+                    },
+                    scales: {
+                        x: { 
+                            ticks: { color: '#6b7280' },
+                            grid: { color: '#e5e7eb' }
+                        },
+                        y: { 
+                            ticks: { color: '#6b7280' },
+                            grid: { color: '#e5e7eb' }
+                        }
+                    }
+                }
+            });
+        }
+
+        function renderDailyAvgChart() {
+            var consumptions = getConsumptionData();
+            var labels = [];
+            var data = [];
+            
+            consumptions.forEach(function(c) {
+                var label = c.monthName + ' ' + c.year;
+                labels.push(label);
+                data.push(c.dailyAvg);
+            });
+            
+            var ctx = document.getElementById('dailyAvgChart').getContext('2d');
+            charts.dailyAvg = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: labels,
+                    datasets: [{
+                        label: 'Denní průměr (' + selectedMeter.unit + '/den)',
+                        data: data,
+                        borderColor: '#06b6d4',
+                        backgroundColor: 'rgba(6, 182, 212, 0.1)',
+                        tension: 0.4,
+                        fill: true
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: { labels: { color: '#374151' } }
+                    },
+                    scales: {
+                        x: { 
+                            ticks: { 
+                                color: '#6b7280',
+                                maxRotation: 45,
+                                minRotation: 45
+                            },
+                            grid: { color: '#e5e7eb' }
+                        },
+                        y: { 
+                            ticks: { color: '#6b7280' },
+                            grid: { color: '#e5e7eb' }
+                        }
+                    }
+                }
+            });
+        }
+
+        function renderYearComparisonChart() {
+            var consumptions = getConsumptionData();
+            var yearMonthData = {};
+            
+            consumptions.forEach(function(c) {
+                if (!yearMonthData[c.year]) {
+                    yearMonthData[c.year] = Array(12).fill(0);
+                }
+                yearMonthData[c.year][c.month] += c.value;
+            });
+            
+            var years = Object.keys(yearMonthData).sort();
+            var months = ['led', 'úno', 'bře', 'dub', 'kvě', 'čer', 'čvc', 'srp', 'zář', 'říj', 'lis', 'pro'];
+            
+            var colors = ['#3b82f6', '#ef4444', '#10b981', '#f59e0b', '#8b5cf6', '#ec4899'];
+            var datasets = years.map(function(year, idx) {
+                return {
+                    label: year,
+                    data: yearMonthData[year],
+                    borderColor: colors[idx % colors.length],
+                    backgroundColor: colors[idx % colors.length],
+                    tension: 0.4
+                };
+            });
+            
+            var ctx = document.getElementById('yearComparisonChart').getContext('2d');
+            charts.yearComparison = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: months,
+                    datasets: datasets
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: { labels: { color: '#374151' } }
+                    },
+                    scales: {
+                        x: { 
+                            ticks: { color: '#6b7280' },
+                            grid: { color: '#e5e7eb' }
+                        },
+                        y: { 
+                            ticks: { color: '#6b7280' },
+                            grid: { color: '#e5e7eb' }
+                        }
+                    }
+                }
+            });
+        }
+
+        function calculateStatistics() {
+            var consumptions = getConsumptionData();
+            
+            // Filtrovat pouze platné spotřeby (ne výměny měřidel)
+            var validConsumptions = consumptions.filter(function(c) { return !c.isMeterChange && c.value > 0; });
+            
+            if (validConsumptions.length === 0) {
+                document.getElementById('avgConsumption').textContent = '-';
+                document.getElementById('maxConsumption').textContent = '-';
+                document.getElementById('minConsumption').textContent = '-';
+                document.getElementById('totalConsumption').textContent = '-';
+                document.getElementById('readingCount').textContent = filteredData.length;
+                return;
+            }
+            
+            var values = validConsumptions.map(function(c) { return c.value; });
+            var avg = values.reduce(function(a, b) { return a + b; }, 0) / values.length;
+            var max = Math.max.apply(null, values);
+            var min = Math.min.apply(null, values);
+            var total = values.reduce(function(a, b) { return a + b; }, 0);
+            
+            document.getElementById('avgConsumption').textContent = avg.toFixed(2) + ' ' + selectedMeter.unit;
+            document.getElementById('maxConsumption').textContent = max.toFixed(2) + ' ' + selectedMeter.unit;
+            document.getElementById('minConsumption').textContent = min.toFixed(2) + ' ' + selectedMeter.unit;
+            document.getElementById('totalConsumption').textContent = total.toFixed(2) + ' ' + selectedMeter.unit;
+            document.getElementById('readingCount').textContent = filteredData.length;
+        }
+
+        function renderHistoryTable() {
+            var table = document.getElementById('historyTable');
+            table.innerHTML = '';
+            
+            for (var i = filteredData.length - 1; i >= 0; i--) {
+                var reading = filteredData[i];
+                var consumption = i > 0 ? reading.stav - filteredData[i - 1].stav : null;
+                var daysDiff = i > 0 ? Math.round((new Date(reading.datum) - new Date(filteredData[i - 1].datum)) / (1000 * 60 * 60 * 24)) : null;
+                var dailyAvg = consumption !== null && daysDiff > 0 && consumption >= 0 ? consumption / daysDiff : null;
+                
+                var row = document.createElement('tr');
+                row.className = 'border-b border-gray-200 hover:bg-gray-50 transition-all';
+                
+                var consumptionText = '-';
+                var consumptionClass = 'text-gray-700';
+                if (consumption !== null) {
+                    if (consumption < 0) {
+                        consumptionText = '<span class="text-orange-600 font-semibold">Výměna měřidla</span>';
+                    } else {
+                        consumptionText = consumption.toFixed(2);
+                    }
+                }
+                
+                row.innerHTML = '<td class="text-gray-800 py-3 px-4">' + new Date(reading.datum).toLocaleDateString('cs-CZ') + '</td>' +
+                    '<td class="text-gray-800 text-right py-3 px-4 font-mono">' + reading.stav + ' ' + selectedMeter.unit + '</td>' +
+                    '<td class="' + consumptionClass + ' text-right py-3 px-4 font-mono">' + consumptionText + '</td>' +
+                    '<td class="text-gray-600 text-right py-3 px-4">' + (daysDiff !== null ? daysDiff + ' dní' : '-') + '</td>' +
+                    '<td class="text-gray-600 text-right py-3 px-4">' + (dailyAvg !== null ? dailyAvg.toFixed(2) : '-') + '</td>';
+                table.appendChild(row);
+            }
+        }
+
+        function showAddForm() {
+            document.getElementById('addModal').classList.remove('hidden');
+            document.getElementById('meterSelection').classList.remove('hidden');
+            document.getElementById('addFormFields').classList.add('hidden');
+            
+            var buttons = document.getElementById('meterButtons');
+            buttons.innerHTML = '';
+            
+            METERS.forEach(function(meter) {
+                var btn = document.createElement('button');
+                btn.className = 'w-full bg-gray-100 hover:bg-gray-200 p-4 rounded-xl text-left transition-all flex items-center gap-3';
+                btn.onclick = function() { selectMeter(meter); };
+                btn.innerHTML = '<div class="w-10 h-10 rounded-lg bg-gradient-to-br ' + meter.color + ' flex items-center justify-center text-xl">' + meter.icon + '</div><span class="text-gray-800 font-medium">' + meter.name + '</span>';
+                buttons.appendChild(btn);
+            });
+        }
+
+        function selectMeter(meter) {
+            currentMeterForAdd = meter;
+            document.getElementById('meterSelection').classList.add('hidden');
+            document.getElementById('addFormFields').classList.remove('hidden');
+            document.getElementById('selectedMeterName').textContent = meter.name;
+            document.getElementById('unitLabel').textContent = '(' + meter.unit + ')';
+            document.getElementById('datumInput').value = new Date().toISOString().split('T')[0];
+        }
+
+        function closeAddForm() {
+            document.getElementById('addModal').classList.add('hidden');
+            currentMeterForAdd = null;
+            document.getElementById('datumInput').value = '';
+            document.getElementById('stavInput').value = '';
+        }
+
+        function cancelAddForm() {
+            document.getElementById('addFormFields').classList.add('hidden');
+            document.getElementById('meterSelection').classList.remove('hidden');
+            currentMeterForAdd = null;
+        }
+
+        function submitReading() {
+            var datum = document.getElementById('datumInput').value;
+            var stav = document.getElementById('stavInput').value;
+            
+            if (!datum || !stav || !currentMeterForAdd) {
+                alert('Vyplňte prosím všechna pole');
+                return;
+            }
+
+            var btn = document.getElementById('submitBtn');
+            btn.disabled = true;
+            btn.textContent = 'Ukládám...';
+
+            fetch(API_URL, {
+                method: 'POST',
+                body: JSON.stringify({
+                    sheet: currentMeterForAdd.id,
+                    datum: datum,
+                    stav: parseFloat(stav)
+                })
+            })
+            .then(function(response) {
+                if (response.ok) {
+                    return loadAllData();
+                }
+            })
+            .then(function() {
+                closeAddForm();
+                alert('Odečet byl úspěšně uložen!');
+                if (selectedMeter) {
+                    filteredData = allData[selectedMeter.id] || [];
+                    updateDetailPage();
+                }
+            })
+            .catch(function(error) {
+                console.error('Chyba:', error);
+                alert('Nepodařilo se uložit odečet. Zkuste to prosím znovu.');
+            })
+            .finally(function() {
+                btn.disabled = false;
+                btn.textContent = 'Uložit';
+            });
+        }
+
+        function exportCSV() {
+            if (!selectedMeter) return;
+            
+            var csv = 'Datum,Stav,Spotřeba,Rozdíl dnů,Denní průměr\n';
+            for (var i = 0; i < filteredData.length; i++) {
+                var reading = filteredData[i];
+                var consumption = i > 0 ? reading.stav - filteredData[i - 1].stav : '';
+                var daysDiff = i > 0 ? Math.round((new Date(reading.datum) - new Date(filteredData[i - 1].datum)) / (1000 * 60 * 60 * 24)) : '';
+                var dailyAvg = consumption && daysDiff ? (consumption / daysDiff).toFixed(2) : '';
+                csv += reading.datum + ',' + reading.stav + ',' + consumption + ',' + daysDiff + ',' + dailyAvg + '\n';
+            }
+            
+            var blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+            var url = window.URL.createObjectURL(blob);
+            var a = document.createElement('a');
+            a.href = url;
+            a.download = selectedMeter.name + '_export.csv';
+            a.click();
+        }
+
+        loadAllData();
+    </script>
+</body>
+</html>
